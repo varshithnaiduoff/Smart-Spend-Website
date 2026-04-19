@@ -49,6 +49,7 @@ const Dashboard = ({ onLogout, userEmail }: DashboardProps) => {
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard"],
     queryFn: api.getDashboard,
+    refetchOnMount: "always",
   });
 
   const handleInstallApp = async () => {

@@ -7,6 +7,7 @@ const RewardsPage = () => {
   const { data, isLoading } = useQuery({
     queryKey: ["rewards"],
     queryFn: api.getRewards,
+    refetchOnMount: "always",
   });
 
   if (isLoading || !data) {

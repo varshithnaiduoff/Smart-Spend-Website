@@ -7,6 +7,7 @@ const TransactionsPage = () => {
   const { data, isLoading } = useQuery({
     queryKey: ["transactions"],
     queryFn: api.getTransactions,
+    refetchOnMount: "always",
   });
 
   const transactions = data?.items ?? [];

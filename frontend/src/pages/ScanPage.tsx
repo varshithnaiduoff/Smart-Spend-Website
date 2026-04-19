@@ -19,12 +19,14 @@ const ScanPage = () => {
         amount: -Math.abs(payload.amount),
         source: "scan",
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setAmount("");
       setDescription("");
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["rewards"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+        queryClient.invalidateQueries({ queryKey: ["rewards"] }),
+      ]);
     },
   });
 
