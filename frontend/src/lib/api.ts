@@ -1,3 +1,5 @@
+import { buildApiUrl, env } from "./env";
+
 export type TransactionCategory =
   | "Food"
   | "Bills"
@@ -78,7 +80,7 @@ export interface AuthPayload {
 const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const token = (() => {
     try {
-      const raw = localStorage.getItem("smart-spend-auth");
+      const raw = localStorage.getItem(env.authStorageKey);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as { token?: string };
       return parsed.token ?? null;
@@ -87,7 +89,7 @@ const apiFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
     }
   })();
 
-  const res = await fetch(path, {
+  const res = await fetch(buildApiUrl(path), {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

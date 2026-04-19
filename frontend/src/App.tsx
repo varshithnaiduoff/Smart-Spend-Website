@@ -14,6 +14,7 @@ import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
 import { api, type AuthPayload } from "./lib/api";
 import { clearAuthState, loadAuthState, saveAuthState, type AuthState } from "./lib/auth";
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
 const queryClient = new QueryClient();
 
@@ -82,6 +83,7 @@ const App = () => {
             <Route path="/reminders" element={auth ? <RemindersPage /> : <Navigate to="/auth" replace />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          <PwaInstallPrompt />
           {auth && <BottomNav />}
         </BrowserRouter>
       </TooltipProvider>

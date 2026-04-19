@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { connectToDatabase } from "./db.js";
 import {
   addReminder,
   addTransaction,
@@ -29,33 +30,35 @@ const getBearerToken = (header: string | undefined) => {
 
 const getAuthorizedUser = (authorization: string | undefined) => {
   const token = getBearerToken(authorization);
-  if (!token) return null;
-  const user = getUserFromToken(token);
-  if (!user) return null;
-  return user;
+  return token;
 };
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "smart-spend-backend", date: new Date().toISOString() });
 });
 
-app.get("/api/dashboard", (_req, res) => {
-  const user = getAuthorizedUser(_req.headers.authorization);
+app.get("/api/dashboard", async (_req, res) => {
+  const token = getAuthorizedUser(_req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  res.json(getDashboard(user.id));
+  res.json(await getDashboard(user.id));
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const { email, password } = req.body ?? {};
 
   if (typeof email !== "string" || !email.includes("@") || typeof password !== "string" || password.length < 6) {
     return res.status(400).json({ error: "Email or password is invalid" });
   }
 
-  const created = registerUser({ email, password });
+  const created = await registerUser({ email, password });
   if (!created) {
     return res.status(409).json({ error: "Email already exists" });
   }
@@ -63,13 +66,13 @@ app.post("/api/auth/register", (req, res) => {
   return res.status(201).json(created);
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body ?? {};
   if (typeof email !== "string" || typeof password !== "string") {
     return res.status(400).json({ error: "Email or password is invalid" });
   }
 
-  const auth = loginUser({ email, password });
+  const auth = await loginUser({ email, password });
   if (!auth) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
@@ -77,13 +80,13 @@ app.post("/api/auth/login", (req, res) => {
   return res.json(auth);
 });
 
-app.get("/api/auth/me", (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   const token = getBearerToken(req.headers.authorization);
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const user = getUserFromToken(token);
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -91,27 +94,37 @@ app.get("/api/auth/me", (req, res) => {
   return res.json({ user });
 });
 
-app.post("/api/auth/logout", (req, res) => {
+app.post("/api/auth/logout", async (req, res) => {
   const token = getBearerToken(req.headers.authorization);
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  logoutSession(token);
+  await logoutSession(token);
   return res.status(204).send();
 });
 
-app.get("/api/transactions", (_req, res) => {
-  const user = getAuthorizedUser(_req.headers.authorization);
+app.get("/api/transactions", async (_req, res) => {
+  const token = getAuthorizedUser(_req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  res.json({ items: getTransactions(user.id) });
+  res.json({ items: await getTransactions(user.id) });
 });
 
-app.post("/api/transactions", (req, res) => {
-  const user = getAuthorizedUser(req.headers.authorization);
+app.post("/api/transactions", async (req, res) => {
+  const token = getAuthorizedUser(req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -122,7 +135,7 @@ app.post("/api/transactions", (req, res) => {
     return res.status(400).json({ error: "Invalid transaction payload" });
   }
 
-  const created = addTransaction(user.id, {
+  const created = await addTransaction(user.id, {
     name: name.trim(),
     amount,
     category,
@@ -132,26 +145,41 @@ app.post("/api/transactions", (req, res) => {
   return res.status(201).json(created);
 });
 
-app.get("/api/rewards", (_req, res) => {
-  const user = getAuthorizedUser(_req.headers.authorization);
+app.get("/api/rewards", async (_req, res) => {
+  const token = getAuthorizedUser(_req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  res.json(getRewards(user.id));
+  res.json(await getRewards(user.id));
 });
 
-app.get("/api/reminders", (_req, res) => {
-  const user = getAuthorizedUser(_req.headers.authorization);
+app.get("/api/reminders", async (_req, res) => {
+  const token = getAuthorizedUser(_req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  res.json({ items: getReminders(user.id) });
+  res.json({ items: await getReminders(user.id) });
 });
 
-app.post("/api/reminders", (req, res) => {
-  const user = getAuthorizedUser(req.headers.authorization);
+app.post("/api/reminders", async (req, res) => {
+  const token = getAuthorizedUser(req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -162,12 +190,17 @@ app.post("/api/reminders", (req, res) => {
     return res.status(400).json({ error: "Invalid reminder payload" });
   }
 
-  const created = addReminder(user.id, { title: title.trim(), amount, dueDate });
+  const created = await addReminder(user.id, { title: title.trim(), amount, dueDate });
   return res.status(201).json(created);
 });
 
-app.patch("/api/reminders/:id/toggle", (req, res) => {
-  const user = getAuthorizedUser(req.headers.authorization);
+app.patch("/api/reminders/:id/toggle", async (req, res) => {
+  const token = getAuthorizedUser(req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -177,7 +210,7 @@ app.patch("/api/reminders/:id/toggle", (req, res) => {
     return res.status(400).json({ error: "Invalid reminder id" });
   }
 
-  const updated = toggleReminder(user.id, id);
+  const updated = await toggleReminder(user.id, id);
   if (!updated) {
     return res.status(404).json({ error: "Reminder not found" });
   }
@@ -185,8 +218,13 @@ app.patch("/api/reminders/:id/toggle", (req, res) => {
   return res.json(updated);
 });
 
-app.delete("/api/reminders/:id", (req, res) => {
-  const user = getAuthorizedUser(req.headers.authorization);
+app.delete("/api/reminders/:id", async (req, res) => {
+  const token = getAuthorizedUser(req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const user = await getUserFromToken(token);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -196,7 +234,7 @@ app.delete("/api/reminders/:id", (req, res) => {
     return res.status(400).json({ error: "Invalid reminder id" });
   }
 
-  const removed = deleteReminder(user.id, id);
+  const removed = await deleteReminder(user.id, id);
   if (!removed) {
     return res.status(404).json({ error: "Reminder not found" });
   }
@@ -204,6 +242,14 @@ app.delete("/api/reminders/:id", (req, res) => {
   return res.status(204).send();
 });
 
-app.listen(port, () => {
-  console.log(`Smart Spend backend running on http://localhost:${port}`);
+const startServer = async () => {
+  await connectToDatabase();
+  app.listen(port, () => {
+    console.log(`Smart Spend backend running on http://localhost:${port}`);
+  });
+};
+
+startServer().catch((error) => {
+  console.error("Failed to start backend", error);
+  process.exit(1);
 });

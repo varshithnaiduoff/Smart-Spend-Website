@@ -1,15 +1,10 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import mongoose, { Schema, model } from "mongoose";
 import type { AuthResponse, AuthUser, DashboardResponse, Reminder, RewardsResponse, Transaction, TransactionCategory } from "./types.js";
 
 const monthStart = () => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1);
-};
-
-const daysAgo = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString();
 };
 
 const monthlyGoal = 2000;
@@ -24,32 +19,79 @@ const categoryIcons: Record<TransactionCategory, string> = {
   Other: "📌",
 };
 
-type UserData = {
-  transactions: Transaction[];
-  reminders: Reminder[];
-};
-
-const userData = new Map<number, UserData>();
-
-const getUserData = (userId: number): UserData => {
-  const existing = userData.get(userId);
-  if (existing) return existing;
-
-  const created: UserData = {
-    transactions: [],
-    reminders: [],
-  };
-
-  userData.set(userId, created);
-  return created;
-};
-
-type StoredUser = AuthUser & {
+interface UserDoc {
+  id: number;
+  email: string;
   passwordHash: string;
-};
+  createdAt: string;
+}
 
-let users: StoredUser[] = [];
-const sessions = new Map<string, number>();
+interface SessionDoc {
+  token: string;
+  userId: number;
+  createdAt: string;
+}
+
+interface TransactionDoc extends Transaction {
+  userId: number;
+}
+
+interface ReminderDoc extends Reminder {
+  userId: number;
+}
+
+const UserSchema = new Schema<UserDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    email: { type: String, required: true, unique: true, index: true },
+    passwordHash: { type: String, required: true },
+    createdAt: { type: String, required: true },
+  },
+  { versionKey: false },
+);
+
+const SessionSchema = new Schema<SessionDoc>(
+  {
+    token: { type: String, required: true, unique: true, index: true },
+    userId: { type: Number, required: true, index: true },
+    createdAt: { type: String, required: true },
+  },
+  { versionKey: false },
+);
+
+const TransactionSchema = new Schema<TransactionDoc>(
+  {
+    id: { type: Number, required: true, unique: true, index: true },
+    userId: { type: Number, required: true, index: true },
+    name: { type: String, required: true },
+    amount: { type: Number, required: true },
+    category: { type: String, required: true },
+    icon: { type: String, required: true },
+    coins: { type: Number, required: true },
+    source: { type: String, required: true },
+    createdAt: { type: String, required: true },
+  },
+  { versionKey: false },
+);
+
+const ReminderSchema = new Schema<ReminderDoc>(
+  {
+    id: { type: Number, required: true, unique: true, index: true },
+    userId: { type: Number, required: true, index: true },
+    title: { type: String, required: true },
+    amount: { type: Number, required: true },
+    dueDate: { type: String, required: true },
+    icon: { type: String, required: true },
+    enabled: { type: Boolean, required: true },
+  },
+  { versionKey: false },
+);
+
+const UserModel = (mongoose.models.User as mongoose.Model<UserDoc>) || model<UserDoc>("User", UserSchema);
+const SessionModel = (mongoose.models.Session as mongoose.Model<SessionDoc>) || model<SessionDoc>("Session", SessionSchema);
+const TransactionModel =
+  (mongoose.models.Transaction as mongoose.Model<TransactionDoc>) || model<TransactionDoc>("Transaction", TransactionSchema);
+const ReminderModel = (mongoose.models.Reminder as mongoose.Model<ReminderDoc>) || model<ReminderDoc>("Reminder", ReminderSchema);
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
@@ -69,13 +111,13 @@ const verifyPassword = (password: string, stored: string) => {
   return timingSafeEqual(candidate, original);
 };
 
-const createSession = (userId: number) => {
+const createSession = async (userId: number) => {
   const token = randomBytes(32).toString("hex");
-  sessions.set(token, userId);
+  await SessionModel.create({ token, userId, createdAt: new Date().toISOString() });
   return token;
 };
 
-const toAuthUser = (user: StoredUser): AuthUser => ({
+const toAuthUser = (user: Pick<UserDoc, "id" | "email" | "createdAt">): AuthUser => ({
   id: user.id,
   email: user.email,
   createdAt: user.createdAt,
@@ -138,8 +180,22 @@ const streakDays = (transactions: Transaction[]) => {
   return streak;
 };
 
-export const getDashboard = (userId: number): DashboardResponse => {
-  const { transactions } = getUserData(userId);
+const loadUserTransactions = async (userId: number): Promise<Transaction[]> => {
+  const rows = await TransactionModel.find({ userId }).sort({ createdAt: -1 }).lean();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    amount: row.amount,
+    category: row.category,
+    icon: row.icon,
+    coins: row.coins,
+    source: row.source,
+    createdAt: row.createdAt,
+  }));
+};
+
+export const getDashboard = async (userId: number): Promise<DashboardResponse> => {
+  const transactions = await loadUserTransactions(userId);
   const currentSpend = monthlyExpenses(transactions);
   const progress = Math.round((currentSpend / monthlyGoal) * 100);
 
@@ -150,35 +206,33 @@ export const getDashboard = (userId: number): DashboardResponse => {
     streak: streakDays(transactions),
     totalCoins: totalCoins(transactions),
     todayCoins: todayCoins(transactions),
-    recentTransactions: [...transactions]
-      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-      .slice(0, 4)
-      .map((tx) => ({
-        id: tx.id,
-        name: tx.name,
-        amount: tx.amount,
-        coins: tx.coins,
-        date: formatRelativeDay(tx.createdAt),
-        icon: tx.icon,
-      })),
+    recentTransactions: transactions.slice(0, 4).map((tx) => ({
+      id: tx.id,
+      name: tx.name,
+      amount: tx.amount,
+      coins: tx.coins,
+      date: formatRelativeDay(tx.createdAt),
+      icon: tx.icon,
+    })),
   };
 };
 
-export const getTransactions = (userId: number) => {
-  const { transactions } = getUserData(userId);
-  return [...transactions]
-    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-    .map((tx) => ({
-      ...tx,
-      date: new Date(tx.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-    }));
+export const getTransactions = async (userId: number) => {
+  const transactions = await loadUserTransactions(userId);
+  return transactions.map((tx) => ({
+    ...tx,
+    date: new Date(tx.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+  }));
 };
 
-export const addTransaction = (userId: number, input: { name: string; amount: number; category?: TransactionCategory; source?: "manual" | "scan" }) => {
-  const data = getUserData(userId);
+export const addTransaction = async (
+  userId: number,
+  input: { name: string; amount: number; category?: TransactionCategory; source?: "manual" | "scan" },
+) => {
   const normalizedCategory = input.amount > 0 ? "Income" : input.category ?? "Other";
-  const tx: Transaction = {
+  const tx: TransactionDoc = {
     id: Date.now(),
+    userId,
     name: input.name,
     amount: input.amount,
     category: normalizedCategory,
@@ -188,16 +242,26 @@ export const addTransaction = (userId: number, input: { name: string; amount: nu
     source: input.source ?? "manual",
   };
 
-  data.transactions = [tx, ...data.transactions];
+  await TransactionModel.create(tx);
   return tx;
 };
 
-export const getReminders = (userId: number) => getUserData(userId).reminders;
+export const getReminders = async (userId: number): Promise<Reminder[]> => {
+  const rows = await ReminderModel.find({ userId }).sort({ id: -1 }).lean();
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    amount: row.amount,
+    dueDate: row.dueDate,
+    icon: row.icon,
+    enabled: row.enabled,
+  }));
+};
 
-export const addReminder = (userId: number, input: { title: string; amount: number; dueDate?: string }) => {
-  const data = getUserData(userId);
-  const reminder: Reminder = {
+export const addReminder = async (userId: number, input: { title: string; amount: number; dueDate?: string }) => {
+  const reminder: ReminderDoc = {
     id: Date.now(),
+    userId,
     title: input.title,
     amount: input.amount,
     dueDate: input.dueDate ?? "Monthly",
@@ -205,25 +269,34 @@ export const addReminder = (userId: number, input: { title: string; amount: numb
     enabled: true,
   };
 
-  data.reminders = [...data.reminders, reminder];
+  await ReminderModel.create(reminder);
   return reminder;
 };
 
-export const toggleReminder = (userId: number, id: number) => {
-  const data = getUserData(userId);
-  data.reminders = data.reminders.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r));
-  return data.reminders.find((r) => r.id === id) ?? null;
+export const toggleReminder = async (userId: number, id: number) => {
+  const reminder = await ReminderModel.findOne({ userId, id });
+  if (!reminder) return null;
+
+  reminder.enabled = !reminder.enabled;
+  await reminder.save();
+
+  return {
+    id: reminder.id,
+    title: reminder.title,
+    amount: reminder.amount,
+    dueDate: reminder.dueDate,
+    icon: reminder.icon,
+    enabled: reminder.enabled,
+  };
 };
 
-export const deleteReminder = (userId: number, id: number) => {
-  const data = getUserData(userId);
-  const before = data.reminders.length;
-  data.reminders = data.reminders.filter((r) => r.id !== id);
-  return data.reminders.length !== before;
+export const deleteReminder = async (userId: number, id: number) => {
+  const result = await ReminderModel.deleteOne({ userId, id });
+  return result.deletedCount > 0;
 };
 
-export const getRewards = (userId: number): RewardsResponse => {
-  const { transactions } = getUserData(userId);
+export const getRewards = async (userId: number): Promise<RewardsResponse> => {
+  const transactions = await loadUserTransactions(userId);
   const txCount = transactions.length;
   const streak = streakDays(transactions);
   const currentSpend = monthlyExpenses(transactions);
@@ -287,47 +360,50 @@ export const getRewards = (userId: number): RewardsResponse => {
   };
 };
 
-export const registerUser = (input: { email: string; password: string }): AuthResponse | null => {
+export const registerUser = async (input: { email: string; password: string }): Promise<AuthResponse | null> => {
   const email = normalizeEmail(input.email);
-  if (users.some((u) => u.email === email)) return null;
+  const existing = await UserModel.findOne({ email }).lean();
+  if (existing) return null;
 
-  const user: StoredUser = {
+  const user: UserDoc = {
     id: Date.now(),
     email,
     passwordHash: hashPassword(input.password),
     createdAt: new Date().toISOString(),
   };
 
-  users = [...users, user];
-  getUserData(user.id);
+  await UserModel.create(user);
+  const token = await createSession(user.id);
 
-  const token = createSession(user.id);
   return {
     token,
     user: toAuthUser(user),
   };
 };
 
-export const loginUser = (input: { email: string; password: string }): AuthResponse | null => {
+export const loginUser = async (input: { email: string; password: string }): Promise<AuthResponse | null> => {
   const email = normalizeEmail(input.email);
-  const user = users.find((u) => u.email === email);
+  const user = await UserModel.findOne({ email }).lean();
   if (!user) return null;
   if (!verifyPassword(input.password, user.passwordHash)) return null;
 
-  const token = createSession(user.id);
+  const token = await createSession(user.id);
   return {
     token,
     user: toAuthUser(user),
   };
 };
 
-export const getUserFromToken = (token: string): AuthUser | null => {
-  const userId = sessions.get(token);
-  if (!userId) return null;
+export const getUserFromToken = async (token: string): Promise<AuthUser | null> => {
+  const session = await SessionModel.findOne({ token }).lean();
+  if (!session) return null;
 
-  const user = users.find((u) => u.id === userId);
+  const user = await UserModel.findOne({ id: session.userId }).lean();
   if (!user) return null;
   return toAuthUser(user);
 };
 
-export const logoutSession = (token: string) => sessions.delete(token);
+export const logoutSession = async (token: string) => {
+  const result = await SessionModel.deleteOne({ token });
+  return result.deletedCount > 0;
+};

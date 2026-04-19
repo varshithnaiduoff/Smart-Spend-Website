@@ -1,11 +1,12 @@
 import type { AuthUser } from "./api";
+import { env } from "./env";
 
 export interface AuthState {
   token: string;
   user: AuthUser;
 }
 
-const AUTH_KEY = "smart-spend-auth";
+const AUTH_KEY = env.authStorageKey;
 
 export const loadAuthState = (): AuthState | null => {
   const raw = localStorage.getItem(AUTH_KEY);

@@ -1,9 +1,16 @@
 import { motion } from "framer-motion";
 import { Flame, TrendingUp, Target, Coins } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import CoinBadge from "../components/CoinBadge";
 import ProgressRing from "../components/ProgressRing";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
 
 interface DashboardProps {
   onLogout: () => void;
@@ -11,10 +18,62 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ onLogout, userEmail }: DashboardProps) => {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setIsStandalone(standalone);
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const handleInstalled = () => {
+      setIsStandalone(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard"],
     queryFn: api.getDashboard,
   });
+
+  const handleInstallApp = async () => {
+    if (isStandalone) return;
+
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === "accepted") {
+        setDeferredPrompt(null);
+      }
+      return;
+    }
+
+    const ua = navigator.userAgent;
+    const isIos = /iPhone|iPad|iPod/i.test(ua);
+    const isSafari = /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
+
+    if (isIos && isSafari) {
+      window.alert("To install: tap Share in Safari, then tap Add to Home Screen.");
+      return;
+    }
+
+    window.alert("Install is not available yet on this browser. Open browser menu and choose Install app / Add to Home Screen.");
+  };
 
   if (isLoading || !data) {
     return <div className="min-h-screen pb-24 px-4 pt-6 max-w-lg mx-auto">Loading...</div>;
@@ -34,11 +93,18 @@ const Dashboard = ({ onLogout, userEmail }: DashboardProps) => {
           <p className="text-muted-foreground text-sm truncate max-w-[220px]">{userEmail}</p>
           <h1 className="text-2xl font-display font-bold">Smart Spend</h1>
         </div>
-        <div className="text-right">
+        <div className="flex flex-col items-end gap-2">
           <CoinBadge amount={totalCoins} />
-          <button onClick={onLogout} className="text-xs text-muted-foreground hover:text-primary mt-1">
-            Sign out
-          </button>
+          <div className="flex items-center gap-2">
+            {!isStandalone && (
+              <Button onClick={handleInstallApp} size="sm" className="bg-gradient-primary text-primary-foreground">
+                Download App
+              </Button>
+            )}
+            <Button onClick={onLogout} variant="secondary" size="sm">
+              Sign out
+            </Button>
+          </div>
         </div>
       </motion.div>
 
