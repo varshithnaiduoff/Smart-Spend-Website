@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import * as dotenv from "dotenv";
 import { connectToDatabase } from "./db.js";
 import {
   addReminder,
@@ -19,6 +20,7 @@ import {
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
 
+dotenv.config();
 app.use(cors());
 app.use(express.json());
 
